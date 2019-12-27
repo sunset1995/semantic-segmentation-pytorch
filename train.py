@@ -208,6 +208,7 @@ def main(cfg, gpus):
 if __name__ == '__main__':
     assert LooseVersion(torch.__version__) >= LooseVersion('0.4.0'), \
         'PyTorch>=0.4.0 is required'
+    torch.backends.cudnn.benchmark = True
 
     parser = argparse.ArgumentParser(
         description="PyTorch Semantic Segmentation Training"
