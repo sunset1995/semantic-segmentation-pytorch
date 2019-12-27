@@ -94,6 +94,9 @@ class ModelBuilder:
         elif arch == 'resnet101dilated':
             orig_resnet = resnet.__dict__['resnet101'](pretrained=pretrained)
             net_encoder = ResnetDilated(orig_resnet, dilate_scale=8)
+        elif arch == 'resnet101dilated16':
+            orig_resnet = resnet.__dict__['resnet101'](pretrained=pretrained)
+            net_encoder = ResnetDilated(orig_resnet, dilate_scale=16, return_conv1=True)
         elif arch == 'resnext101':
             orig_resnext = resnext.__dict__['resnext101'](pretrained=pretrained)
             net_encoder = Resnet(orig_resnext) # we can still use class Resnet
@@ -147,6 +150,11 @@ class ModelBuilder:
                 fc_dim=fc_dim,
                 use_softmax=use_softmax,
                 fpn_dim=512)
+        elif arch == 'acnet':
+            net_decoder = ACNet(
+                num_class=num_class,
+                fc_dim=fc_dim,
+                use_softmax=use_softmax)
         else:
             raise Exception('Architecture undefined!')
 
@@ -207,8 +215,9 @@ class Resnet(nn.Module):
 
 
 class ResnetDilated(nn.Module):
-    def __init__(self, orig_resnet, dilate_scale=8):
+    def __init__(self, orig_resnet, dilate_scale=8, return_conv1=False):
         super(ResnetDilated, self).__init__()
+        self.return_conv1 = return_conv1
         from functools import partial
 
         if dilate_scale == 8:
@@ -257,6 +266,8 @@ class ResnetDilated(nn.Module):
         x = self.relu1(self.bn1(self.conv1(x)))
         x = self.relu2(self.bn2(self.conv2(x)))
         x = self.relu3(self.bn3(self.conv3(x)))
+        if self.return_conv1:
+            conv_out.append(x)
         x = self.maxpool(x)
 
         x = self.layer1(x); conv_out.append(x);
@@ -585,3 +596,99 @@ class UPerNet(nn.Module):
         x = nn.functional.log_softmax(x, dim=1)
 
         return x
+
+
+# acblock
+class ACBlock(nn.Module):
+    def __init__(self, fpn_dim, prev_lateral_dim, lateral_dim,
+                 use_global, delta=5):
+        super(ACBlock, self).__init__()
+        self.delta = delta
+        self.use_global = use_global
+        self.skip_conv = nn.Sequential(
+            nn.Conv2d(fpn_dim, fpn_dim, 3, padding=1, bias=False),
+            nn.BatchNorm2d(fpn_dim),
+            nn.ReLU(inplace=True)
+        )
+        self.global_conv = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),
+            nn.Conv2d(prev_lateral_dim, prev_lateral_dim, 1, bias=False),
+            nn.BatchNorm2d(prev_lateral_dim),
+            nn.ReLU(inplace=True)
+        )
+        self.local_conv1 = conv3x3_bn_relu(fpn_dim+prev_lateral_dim, lateral_dim)
+        self.local_conv2 = conv3x3_bn_relu(fpn_dim+lateral_dim, lateral_dim)
+        self.local_conv3 = conv3x3_bn_relu(fpn_dim+lateral_dim, lateral_dim)
+
+    def forward(self, x, x_skip):
+        # Preprocess skip features
+        x_skip = self.skip_conv(x_skip)
+        out_HW = x_skip.shape[2:]
+
+        # Global module
+        p = self.global_conv(x)
+        d = torch.norm(x - p, dim=1, keepdim=True)  # B1HW
+        d_min = d.min(dim=3)[0].min(dim=2)[0][:,:,None,None]
+        w_g = torch.exp(-(d - d_min) / self.delta)  # B1HW
+        if self.use_global:
+            # TODO: trainable alpha
+            x = w_g * p + x
+
+        # Upsample
+        up_kwargs = {'mode': 'bilinear', 'align_corners': False}
+        x = nn.functional.interpolate(x, size=out_HW, **up_kwargs)
+        w_g = nn.functional.interpolate(w_g, size=out_HW, **up_kwargs)
+
+        # Local module
+        w_l = 1 - w_g
+        x_skip = w_l * x_skip  # TODO: trainable beta
+        x = self.local_conv1(torch.cat([x, x_skip], 1))
+        x = self.local_conv2(torch.cat([x, x_skip], 1))
+        x = self.local_conv3(torch.cat([x, x_skip], 1))
+
+        return x
+
+
+# acnet
+class ACNet(nn.Module):
+    def __init__(self, num_class=150, fc_dim=2048,
+                 use_softmax=False,
+                 acdim1=256, acdim2=448, acdim3=512):
+        super(ACNet, self).__init__()
+        self.use_softmax = use_softmax
+
+        self.last_block_lateral = nn.Sequential(
+            nn.Conv2d(fc_dim, acdim3, 3, padding=1, bias=False),
+            nn.BatchNorm2d(acdim3),
+            nn.ReLU(inplace=True)
+        )
+        self.acb3 = ACBlock(512, acdim3, acdim3, use_global=True)
+        self.acb2 = ACBlock(256, acdim3, acdim2, use_global=False)
+        self.acb1 = ACBlock(128, acdim2, acdim1, use_global=False)
+        self.conv_last = nn.Sequential(
+            conv3x3_bn_relu(acdim1, acdim1, 1),
+            nn.Conv2d(acdim1, num_class, kernel_size=1)
+        )
+
+    def forward(self, conv_out, segSize=None):
+        conv1 = conv_out[0]
+        conv2 = conv_out[1]
+        conv3 = conv_out[2]
+        conv5 = conv_out[4]
+
+        x = self.last_block_lateral(conv5)
+        x = self.acb3(x, conv3)
+        x = self.acb2(x, conv2)
+        x = self.acb1(x, conv1)
+        x = self.conv_last(x)
+
+        if self.use_softmax:  # is True during inference
+            x = nn.functional.interpolate(
+                x, size=segSize, mode='bilinear', align_corners=False)
+            x = nn.functional.softmax(x, dim=1)
+            return x
+
+        x = nn.functional.log_softmax(x, dim=1)
+
+        return x
+
