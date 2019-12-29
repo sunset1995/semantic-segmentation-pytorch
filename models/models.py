@@ -26,18 +26,33 @@ class SegmentationModule(SegmentationModuleBase):
         self.decoder = net_dec
         self.crit = crit
         self.deep_sup_scale = deep_sup_scale
+        self.ohem_hard_thres = 0.7
+        self.ohem_min_pixels = 0.2
 
     def forward(self, feed_dict, *, segSize=None):
         # training
         if segSize is None:
             pred = self.decoder(self.encoder(feed_dict['img_data'], return_feature_maps=True))
+            pred_deepsup = None
             if isinstance(pred, tuple):
                 pred, pred_deepsup = pred
 
             loss = self.crit(pred, feed_dict['seg_label'])
+            # online hard examples mining
+            B, H, W = feed_dict['seg_label'].shape
+            bidx, hidx, widx = torch.meshgrid(torch.arange(B), torch.arange(H), torch.arange(W))
+            pred_gt_prob = torch.exp(pred[bidx, feed_dict['seg_label'], hidx, widx])
+            hard_mask = (pred_gt_prob < self.ohem_hard_thres) & (feed_dict['seg_label'] >= 0)
+            min_pixels = int(self.ohem_min_pixels * (feed_dict['seg_label'] >= 0).sum().item())
+            if hard_mask.sum().item() > min_pixels:
+                loss = loss[hard_mask].mean()
+            else:
+                loss = loss.reshape(-1).topk(min_pixels)[0].mean()
+
+            # deep supervision
             if pred_deepsup is not None:
                 loss_deepsup = self.crit(pred_deepsup, feed_dict['seg_label'])
-                loss = loss + loss_deepsup * self.deep_sup_scale
+                loss = loss + loss_deepsup.mean() * self.deep_sup_scale
 
             acc = self.pixel_acc(pred, feed_dict['seg_label'])
             return loss, acc

@@ -24,15 +24,18 @@ def train(segmentation_module, iterator, optimizers, history, epoch, cfg):
     ave_total_loss = AverageMeter()
     ave_acc = AverageMeter()
 
-    segmentation_module.train(not cfg.TRAIN.fix_bn)
+    segmentation_module.train()
+    if cfg.TRAIN.fix_bn:
+        for m in segmentation_module.modules():
+            segmentation_module.train(False)
 
     # main loop
     tic = time.time()
+    segmentation_module.zero_grad()
     for i in trange(cfg.TRAIN.epoch_iters):
         # load a batch of data
         batch_data = next(iterator)
         data_time.update(time.time() - tic)
-        segmentation_module.zero_grad()
 
         # adjust learning rate
         cur_iter = i + (epoch - 1) * cfg.TRAIN.epoch_iters
@@ -48,6 +51,7 @@ def train(segmentation_module, iterator, optimizers, history, epoch, cfg):
         if (i+1) % cfg.TRAIN.step_iter == 0:
             for optimizer in optimizers:
                 optimizer.step()
+                segmentation_module.zero_grad()
 
         # measure elapsed time
         batch_time.update(time.time() - tic)
@@ -167,7 +171,7 @@ def main(cfg, gpus):
         num_class=cfg.DATASET.num_class,
         weights=cfg.MODEL.weights_decoder)
 
-    crit = nn.NLLLoss(ignore_index=-1)
+    crit = nn.NLLLoss(ignore_index=-1, reduction='none')
 
     segmentation_module = SegmentationModule(
         net_encoder, net_decoder, crit, cfg.TRAIN.deep_sup_scale)
