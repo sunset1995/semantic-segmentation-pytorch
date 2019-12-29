@@ -1,6 +1,7 @@
 # System libs
 import os
 import time
+from tqdm import trange
 # import math
 import random
 import argparse
@@ -27,7 +28,7 @@ def train(segmentation_module, iterator, optimizers, history, epoch, cfg):
 
     # main loop
     tic = time.time()
-    for i in range(cfg.TRAIN.epoch_iters):
+    for i in trange(cfg.TRAIN.epoch_iters):
         # load a batch of data
         batch_data = next(iterator)
         data_time.update(time.time() - tic)
@@ -57,7 +58,7 @@ def train(segmentation_module, iterator, optimizers, history, epoch, cfg):
 
         # calculate accuracy, and display
         if i % cfg.TRAIN.disp_iter == 0:
-            print('Epoch: [{}][{}/{}], Time: {:.2f}, Data: {:.2f}, '
+            print('\rEpoch: [{}][{}/{}], Time: {:.2f}, Data: {:.2f}, '
                   'lr_encoder: {:.6f}, lr_decoder: {:.6f}, '
                   'Accuracy: {:4.2f}, Loss: {:.6f}'
                   .format(epoch, i, cfg.TRAIN.epoch_iters,
@@ -198,6 +199,11 @@ def main(cfg, gpus):
     segmentation_module = UserScatteredDataParallel(
         segmentation_module,
         device_ids=gpus)
+    # Update bn momentum
+    if cfg.MODEL.bn_momentum is not None:
+        for m in segmentation_module.modules():
+            if isinstance(m, nn.modules.batchnorm._BatchNorm):
+                m.momentum = cfg.MODEL.bn_momentum
     # For sync bn
     patch_replication_callback(segmentation_module)
     segmentation_module.cuda()
