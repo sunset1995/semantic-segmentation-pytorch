@@ -151,9 +151,7 @@ class TrainDataset(BaseDataset):
                 segm = segm.transpose(Image.FLIP_LEFT_RIGHT)
 
             # note that each sample within a mini batch has different scale param
-            scale = np.random.uniform(0.5, 1)
-            if np.random.randint(2) == 1:
-                scale = 1.0 / scale
+            scale = np.random.uniform(0.5, 2.0)
             img = imresize(img, (int(img.size[0]*scale), int(img.size[1]*scale)), interp='bilinear')
             segm = imresize(segm, (int(segm.size[0]*scale), int(segm.size[1]*scale)), interp='nearest')
 
