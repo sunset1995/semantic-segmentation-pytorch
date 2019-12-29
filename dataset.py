@@ -122,7 +122,7 @@ class TrainDataset(BaseDataset):
             cropsize = np.random.choice(self.imgSizes)
         else:
             cropsize = self.imgSizes
-        
+
         assert self.padding_constant >= self.segm_downsampling_rate, \
             'padding constant must be equal or large than segm downsamping rate'
         batch_images = torch.zeros(
@@ -199,9 +199,10 @@ class TrainDataset(BaseDataset):
 
 
 class ValDataset(BaseDataset):
-    def __init__(self, root_dataset, odgt, opt, **kwargs):
+    def __init__(self, root_dataset, odgt, scales, opt, **kwargs):
         super(ValDataset, self).__init__(odgt, opt, **kwargs)
         self.root_dataset = root_dataset
+        self.scales = scales
 
     def __getitem__(self, index):
         this_record = self.list_sample[index]
@@ -217,10 +218,7 @@ class ValDataset(BaseDataset):
         ori_width, ori_height = img.size
 
         img_resized_list = []
-        for this_short_size in self.imgSizes:
-            # calculate target height and width
-            scale = min(this_short_size / float(min(ori_height, ori_width)),
-                        self.imgMaxSize / float(max(ori_height, ori_width)))
+        for scale in self.scales:
             target_height, target_width = int(ori_height * scale), int(ori_width * scale)
 
             # to avoid rounding in network

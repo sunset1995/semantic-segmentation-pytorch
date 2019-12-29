@@ -69,6 +69,12 @@ def evaluate(segmentation_module, loader, cfg, gpu):
 
                 # forward pass
                 scores_tmp = segmentation_module(feed_dict, segSize=segSize)
+                # The flip
+                if cfg.VAL.flip:
+                    feed_dict['img_data'] = feed_dict['img_data'].flip(3)
+                    scores_tmp_flip = segmentation_module(feed_dict, segSize=segSize)
+                    feed_dict['img_data'] = feed_dict['img_data'].flip(3)
+                    scores_tmp = (scores_tmp + scores_tmp_flip.flip(3)) / 2
                 scores = scores + scores_tmp / len(cfg.DATASET.imgSizes)
 
             _, pred = torch.max(scores, dim=1)
@@ -127,6 +133,7 @@ def main(cfg, gpu):
     dataset_val = ValDataset(
         cfg.DATASET.root_dataset,
         cfg.DATASET.list_val,
+        cfg.VAL.scales,
         cfg.DATASET)
     loader_val = torch.utils.data.DataLoader(
         dataset_val,

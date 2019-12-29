@@ -84,6 +84,10 @@ _C.VAL.batch_size = 1
 _C.VAL.visualize = False
 # the checkpoint to evaluate on
 _C.VAL.checkpoint = "epoch_20.pth"
+# flip testing augmentation
+_C.VAL.flip = 1
+# scale testing augmentation
+_C.VAL.scales = (1.0, )
 
 # -----------------------------------------------------------------------------
 # Testing
