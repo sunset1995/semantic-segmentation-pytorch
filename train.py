@@ -114,16 +114,30 @@ def group_weight(module):
 
 def create_optimizers(nets, cfg):
     (net_encoder, net_decoder, crit) = nets
-    optimizer_encoder = torch.optim.SGD(
-        group_weight(net_encoder),
-        lr=cfg.TRAIN.lr_encoder,
-        momentum=cfg.TRAIN.beta1,
-        weight_decay=cfg.TRAIN.weight_decay)
-    optimizer_decoder = torch.optim.SGD(
-        group_weight(net_decoder),
-        lr=cfg.TRAIN.lr_decoder,
-        momentum=cfg.TRAIN.beta1,
-        weight_decay=cfg.TRAIN.weight_decay)
+    if cfg.TRAIN.optim == 'SGD':
+        optimizer_encoder = torch.optim.SGD(
+            group_weight(net_encoder),
+            lr=cfg.TRAIN.lr_encoder,
+            momentum=cfg.TRAIN.beta1,
+            weight_decay=cfg.TRAIN.weight_decay)
+        optimizer_decoder = torch.optim.SGD(
+            group_weight(net_decoder),
+            lr=cfg.TRAIN.lr_decoder,
+            momentum=cfg.TRAIN.beta1,
+            weight_decay=cfg.TRAIN.weight_decay)
+    elif cfg.TRAIN.optim == 'Adam':
+        optimizer_encoder = torch.optim.Adam(
+            group_weight(net_encoder),
+            lr=cfg.TRAIN.lr_encoder,
+            betas=(cfg.TRAIN.beta1, 0.999),
+            weight_decay=cfg.TRAIN.weight_decay)
+        optimizer_decoder = torch.optim.Adam(
+            group_weight(net_decoder),
+            lr=cfg.TRAIN.lr_decoder,
+            betas=(cfg.TRAIN.beta1, 0.999),
+            weight_decay=cfg.TRAIN.weight_decay)
+    else:
+        raise NotImplementedError
     return (optimizer_encoder, optimizer_decoder)
 
 
@@ -181,12 +195,11 @@ def main(cfg, gpus):
     iterator_train = iter(loader_train)
 
     # load nets into gpu
-    if len(gpus) > 1:
-        segmentation_module = UserScatteredDataParallel(
-            segmentation_module,
-            device_ids=gpus)
-        # For sync bn
-        patch_replication_callback(segmentation_module)
+    segmentation_module = UserScatteredDataParallel(
+        segmentation_module,
+        device_ids=gpus)
+    # For sync bn
+    patch_replication_callback(segmentation_module)
     segmentation_module.cuda()
 
     # Set up optimizers
