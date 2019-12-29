@@ -45,8 +45,9 @@ def train(segmentation_module, iterator, optimizers, history, epoch, cfg):
 
         # Backward
         loss.backward()
-        for optimizer in optimizers:
-            optimizer.step()
+        if (i+1) % cfg.TRAIN.step_iter == 0:
+            for optimizer in optimizers:
+                optimizer.step()
 
         # measure elapsed time
         batch_time.update(time.time() - tic)
@@ -168,12 +169,8 @@ def main(cfg, gpus):
 
     crit = nn.NLLLoss(ignore_index=-1)
 
-    if cfg.MODEL.arch_decoder.endswith('deepsup'):
-        segmentation_module = SegmentationModule(
-            net_encoder, net_decoder, crit, cfg.TRAIN.deep_sup_scale)
-    else:
-        segmentation_module = SegmentationModule(
-            net_encoder, net_decoder, crit)
+    segmentation_module = SegmentationModule(
+        net_encoder, net_decoder, crit, cfg.TRAIN.deep_sup_scale)
 
     # Dataset and Loader
     dataset_train = TrainDataset(

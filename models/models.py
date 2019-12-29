@@ -30,13 +30,12 @@ class SegmentationModule(SegmentationModuleBase):
     def forward(self, feed_dict, *, segSize=None):
         # training
         if segSize is None:
-            if self.deep_sup_scale is not None: # use deep supervision technique
-                (pred, pred_deepsup) = self.decoder(self.encoder(feed_dict['img_data'], return_feature_maps=True))
-            else:
-                pred = self.decoder(self.encoder(feed_dict['img_data'], return_feature_maps=True))
+            pred = self.decoder(self.encoder(feed_dict['img_data'], return_feature_maps=True))
+            if isinstance(pred, tuple):
+                pred, pred_deepsup = pred
 
             loss = self.crit(pred, feed_dict['seg_label'])
-            if self.deep_sup_scale is not None:
+            if pred_deepsup is not None:
                 loss_deepsup = self.crit(pred_deepsup, feed_dict['seg_label'])
                 loss = loss + loss_deepsup * self.deep_sup_scale
 
@@ -672,6 +671,13 @@ class ACNet(nn.Module):
             conv3x3_bn_relu(acdim1, acdim1, 1),
             nn.Conv2d(acdim1, num_class, kernel_size=1)
         )
+        # deepsup
+        self.deepsup = nn.Sequential(
+            conv3x3_bn_relu(fc_dim//2, fc_dim // 4, 1),
+            nn.Dropout2d(0.1),
+            nn.Conv2d(fc_dim // 4, num_class, 1, 1, 0)
+        )
+
 
     def forward(self, conv_out, segSize=None):
         conv1 = conv_out[0]
@@ -693,5 +699,13 @@ class ACNet(nn.Module):
 
         x = nn.functional.log_softmax(x, dim=1)
 
-        return x
+        # deepsup
+        conv4 = conv_out[-2]
+        x_deepsup = self.deepsup(conv4)
+        if x_deepsup.shape[2:] != x.shape[2:]:
+            x_deepsup = nn.functional.interpolate(
+                x_deepsup, x.shape[2:], mode='bilinear', align_corners=False)
+            x_deepsup = nn.functional.log_softmax(x_deepsup, dim=1)
+
+        return x, x_deepsup
 

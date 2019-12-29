@@ -66,6 +66,8 @@ _C.TRAIN.beta1 = 0.9
 _C.TRAIN.weight_decay = 1e-4
 # the weighting of deep supervision loss
 _C.TRAIN.deep_sup_scale = 0.4
+# iteration per optimizer step
+_C.TRAIN.step_iter = 1
 # fix bn params, only under finetuning
 _C.TRAIN.fix_bn = False
 # number of data loading workers
