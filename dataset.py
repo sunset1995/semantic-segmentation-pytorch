@@ -152,8 +152,15 @@ class TrainDataset(BaseDataset):
 
             # note that each sample within a mini batch has different scale param
             scale = np.random.uniform(0.5, 2.0)
-            img = imresize(img, (int(img.size[0]*scale), int(img.size[1]*scale)), interp='bilinear')
-            segm = imresize(segm, (int(segm.size[0]*scale), int(segm.size[1]*scale)), interp='nearest')
+            target_width, target_height = img.size[0]*scale, img.size[1]*scale
+            if min(target_width, target_height) > self.imgMaxSize:
+                rescale = self.imgMaxSize / min(target_width, target_height)
+                target_width = target_width * rescale
+                target_height = target_height * rescale
+            target_width = self.round2nearest_multiple(int(target_width), self.padding_constant)
+            target_height = self.round2nearest_multiple(int(target_height), self.padding_constant)
+            img = imresize(img, (target_width, target_height), interp='bilinear')
+            segm = imresize(segm, (target_width, target_height), interp='nearest')
 
             # random crop
             if img.size[0] > cropsize:
@@ -218,6 +225,10 @@ class ValDataset(BaseDataset):
         img_resized_list = []
         for scale in self.scales:
             target_height, target_width = int(ori_height * scale), int(ori_width * scale)
+            if min(target_height, target_width) > self.imgMaxSize:
+                rescale = self.imgMaxSize / min(target_height, target_width)
+                target_height = int(target_height * rescale)
+                target_width = int(target_width * rescale)
 
             # to avoid rounding in network
             target_width = self.round2nearest_multiple(target_width, self.padding_constant)
