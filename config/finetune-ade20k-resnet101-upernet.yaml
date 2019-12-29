@@ -20,7 +20,7 @@ TRAIN:
   batch_size_per_gpu: 2
   num_epoch: 5
   start_epoch: 0
-  epoch_iters: 5000
+  epoch_iters: 10000
   optim: "Adam"
   lr_encoder: 1e-6
   lr_decoder: 1e-6
@@ -31,7 +31,7 @@ TRAIN:
   fix_bn: True
   workers: 16
   disp_iter: 20
-  step_iter: 10
+  step_iter: 1
   seed: 304
 
 VAL:
