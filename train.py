@@ -51,7 +51,7 @@ def train(segmentation_module, iterator, optimizers, history, epoch, cfg):
         if (i+1) % cfg.TRAIN.step_iter == 0:
             for optimizer in optimizers:
                 optimizer.step()
-                segmentation_module.zero_grad()
+            segmentation_module.zero_grad()
 
         # measure elapsed time
         batch_time.update(time.time() - tic)
