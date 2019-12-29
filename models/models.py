@@ -88,6 +88,9 @@ class ModelBuilder:
         elif arch == 'resnet50dilated':
             orig_resnet = resnet.__dict__['resnet50'](pretrained=pretrained)
             net_encoder = ResnetDilated(orig_resnet, dilate_scale=8)
+        elif arch == 'resnet50dilated16':
+            orig_resnet = resnet.__dict__['resnet50'](pretrained=pretrained)
+            net_encoder = ResnetDilated(orig_resnet, dilate_scale=16, return_conv1=True)
         elif arch == 'resnet101':
             orig_resnet = resnet.__dict__['resnet101'](pretrained=pretrained)
             net_encoder = Resnet(orig_resnet)

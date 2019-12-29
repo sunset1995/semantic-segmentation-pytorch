@@ -39,4 +39,4 @@ TEST:
   checkpoint: "epoch_25.pth"
   result: "./"
 
-DIR: "ckpt/ade20k-resnet50dilated-ppm_deepsup"
+DIR: "ckpt/ade20k-resnet101dilated-ppm_deepsup"
