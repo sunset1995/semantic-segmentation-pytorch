@@ -518,6 +518,9 @@ class PPMDeepsup(nn.Module):
         _ = self.dropout_deepsup(_)
         _ = self.conv_last_deepsup(_)
 
+        x = nn.functional.interpolate(x, scale_factor=4, mode='bilinear', align_corners=False)
+        _ = nn.functional.interpolate(_, scale_factor=4, mode='bilinear', align_corners=False)
+
         x = nn.functional.log_softmax(x, dim=1)
         _ = nn.functional.log_softmax(_, dim=1)
 
@@ -610,6 +613,7 @@ class UPerNet(nn.Module):
             x = nn.functional.softmax(x, dim=1)
             return x
 
+        x = nn.functional.interpolate(x, scale_factor=4, mode='bilinear', align_corners=False)
         x = nn.functional.log_softmax(x, dim=1)
 
         return x
@@ -712,15 +716,17 @@ class ACNet(nn.Module):
             x = nn.functional.softmax(x, dim=1)
             return x
 
-        x = nn.functional.log_softmax(x, dim=1)
-
         # deepsup
         conv4 = conv_out[-2]
         x_deepsup = self.deepsup(conv4)
-        if x_deepsup.shape[2:] != x.shape[2:]:
-            x_deepsup = nn.functional.interpolate(
-                x_deepsup, x.shape[2:], mode='bilinear', align_corners=False)
-            x_deepsup = nn.functional.log_softmax(x_deepsup, dim=1)
+
+        # upsample
+        x = nn.functional.interpolate(x, scale_factor=2, mode='bilinear', align_corners=False)
+        x_deepsup = nn.functional.interpolate(x_deepsup, x.shape[2:], mode='bilinear', align_corners=False)
+
+        # log softmax for training
+        x = nn.functional.log_softmax(x, dim=1)
+        x_deepsup = nn.functional.log_softmax(x_deepsup, dim=1)
 
         return x, x_deepsup
 

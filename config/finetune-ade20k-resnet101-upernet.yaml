@@ -20,8 +20,8 @@ TRAIN:
   batch_size_per_gpu: 2
   num_epoch: 5
   start_epoch: 0
-  epoch_iters: 10000
-  optim: "Adam"
+  epoch_iters: 5000
+  optim: "SGD"
   lr_encoder: 1e-6
   lr_decoder: 1e-6
   lr_pow: 0.9

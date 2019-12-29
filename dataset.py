@@ -71,8 +71,6 @@ class TrainDataset(BaseDataset):
     def __init__(self, root_dataset, odgt, opt, batch_per_gpu=1, **kwargs):
         super(TrainDataset, self).__init__(odgt, opt, **kwargs)
         self.root_dataset = root_dataset
-        # down sampling rate of segm labe
-        self.segm_downsampling_rate = opt.segm_downsampling_rate
         self.batch_per_gpu = batch_per_gpu
 
         # classify images into two classes: 1. h > w and 2. h <= w
@@ -123,14 +121,11 @@ class TrainDataset(BaseDataset):
         else:
             cropsize = self.imgSizes
 
-        assert self.padding_constant >= self.segm_downsampling_rate, \
-            'padding constant must be equal or large than segm downsamping rate'
         batch_images = torch.zeros(
             self.batch_per_gpu, 3, cropsize, cropsize)
         batch_segms = torch.zeros(
             self.batch_per_gpu,
-            cropsize // self.segm_downsampling_rate,
-            cropsize // self.segm_downsampling_rate).long()
+            cropsize, cropsize).long() - 1
 
         for i in range(self.batch_per_gpu):
             this_record = batch_records[i]
@@ -171,17 +166,6 @@ class TrainDataset(BaseDataset):
                 sy = np.random.randint(img.size[1]-cropsize)
                 img = img.crop((0, sy, img.size[0], sy+cropsize))
                 segm = segm.crop((0, sy, segm.size[0], sy+cropsize))
-
-            # further downsample seg label, need to avoid seg label misalignment
-            segm_rounded_width = self.round2nearest_multiple(segm.size[0], self.segm_downsampling_rate)
-            segm_rounded_height = self.round2nearest_multiple(segm.size[1], self.segm_downsampling_rate)
-            segm_rounded = Image.new('L', (segm_rounded_width, segm_rounded_height), 0)
-            segm_rounded.paste(segm, (0, 0))
-            segm = imresize(
-                segm_rounded,
-                (segm_rounded.size[0] // self.segm_downsampling_rate, \
-                 segm_rounded.size[1] // self.segm_downsampling_rate), \
-                interp='nearest')
 
             # image transform, to torch float tensor 3xHxW
             img = self.img_transform(img)
