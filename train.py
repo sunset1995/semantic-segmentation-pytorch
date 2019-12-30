@@ -27,7 +27,8 @@ def train(segmentation_module, iterator, optimizers, history, epoch, cfg):
     segmentation_module.train()
     if cfg.TRAIN.fix_bn:
         for m in segmentation_module.modules():
-            segmentation_module.train(False)
+            if isinstance(m, nn.modules.batchnorm._BatchNorm):
+                segmentation_module.train(False)
 
     # main loop
     tic = time.time()
