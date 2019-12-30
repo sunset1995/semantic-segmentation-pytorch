@@ -148,8 +148,8 @@ class TrainDataset(BaseDataset):
             # note that each sample within a mini batch has different scale param
             scale = np.random.uniform(0.5, 2.0)
             target_width, target_height = img.size[0]*scale, img.size[1]*scale
-            if min(target_width, target_height) > self.imgMaxSize:
-                rescale = self.imgMaxSize / min(target_width, target_height)
+            if max(target_width, target_height) > self.imgMaxSize:
+                rescale = self.imgMaxSize / max(target_width, target_height)
                 target_width = target_width * rescale
                 target_height = target_height * rescale
             target_width = self.round2nearest_multiple(int(target_width), self.padding_constant)
@@ -209,8 +209,8 @@ class ValDataset(BaseDataset):
         img_resized_list = []
         for scale in self.scales:
             target_height, target_width = int(ori_height * scale), int(ori_width * scale)
-            if min(target_height, target_width) > self.imgMaxSize:
-                rescale = self.imgMaxSize / min(target_height, target_width)
+            if max(target_height, target_width) > self.imgMaxSize:
+                rescale = self.imgMaxSize / max(target_height, target_width)
                 target_height = int(target_height * rescale)
                 target_width = int(target_width * rescale)
 
