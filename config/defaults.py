@@ -42,6 +42,8 @@ _C.MODEL.weights_decoder = ""
 _C.MODEL.fc_dim = 2048
 # bn momentum
 _C.MODEL.bn_momentum = 0.1
+# which net to use
+_C.MODEL.net = 'baseline'
 
 # -----------------------------------------------------------------------------
 # Training

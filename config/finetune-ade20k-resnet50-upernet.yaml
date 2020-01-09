@@ -1,0 +1,46 @@
+DATASET:
+  root_dataset: "./data/"
+  list_train: "./data/training.odgt"
+  list_val: "./data/validation.odgt"
+  num_class: 150
+  imgSizes: (512, )     # random crop size
+  imgMaxSize: 1000      # maximum longest size
+  padding_constant: 32  # eval 時可能會用
+  segm_downsampling_rate: 4  # 沒路用
+  random_flip: True
+
+MODEL:
+  arch_encoder: "resnet50"
+  arch_decoder: "upernet"
+  fc_dim: 2048
+  weights_encoder: "ckpt/ade20k-resnet50-upernet/encoder_epoch_30.pth"
+  weights_decoder: "ckpt/ade20k-resnet50-upernet/decoder_epoch_30.pth"
+  net: "baseline"
+
+TRAIN:
+  batch_size_per_gpu: 4
+  num_epoch: 5
+  start_epoch: 0
+  epoch_iters: 5000
+  optim: "SGD"
+  lr_encoder: 1e-6
+  lr_decoder: 1e-6
+  lr_pow: 0.9
+  beta1: 0.9
+  weight_decay: 1e-4
+  deep_sup_scale: 0.4
+  fix_bn: True   # True when finetuning freeze bn statistic
+  workers: 16
+  disp_iter: 20
+  step_iter: 1
+  seed: 304
+
+VAL:
+  visualize: False
+  checkpoint: "epoch_5.pth"
+
+TEST:
+  checkpoint: "epoch_5.pth"
+  result: "./"
+
+DIR: "ckpt/finetune-ade20k-resnet50-upernet"
