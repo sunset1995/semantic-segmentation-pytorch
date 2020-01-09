@@ -60,6 +60,7 @@ _C.TRAIN.epoch_iters = 5000
 _C.TRAIN.optim = "SGD"
 _C.TRAIN.lr_encoder = 0.02
 _C.TRAIN.lr_decoder = 0.02
+_C.TRAIN.lr_head = 0.1
 # power in poly to drop LR
 _C.TRAIN.lr_pow = 0.9
 # momentum for sgd, beta1 for adam

@@ -12,10 +12,15 @@ class Net(nn.Module):
         self.deep_sup_scale = deep_sup_scale
         self.ohem_hard_thres = 0.7
         self.ohem_min_pixels = 0.2
+        self.head = nn.Identity()  # Head()
 
     def forward(self, feed_dict):
         ret_dict = self.decoder(self.encoder(feed_dict['img_data']))
-
+        ''' ret_dict (from decoder)
+        conv1: from encoder 1/2
+        P5, P4, P3, P2: 1/32, 1/16, 1/8, 1/4
+        logit: after P2, channel=#class, 1/4
+        '''
         '''
         Update start from here
         '''

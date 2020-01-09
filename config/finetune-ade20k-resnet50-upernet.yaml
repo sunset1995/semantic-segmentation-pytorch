@@ -25,11 +25,12 @@ TRAIN:
   optim: "SGD"
   lr_encoder: 1e-6
   lr_decoder: 1e-6
+  lr_head: 1e-4
   lr_pow: 0.9
   beta1: 0.9
   weight_decay: 1e-4
   deep_sup_scale: 0.4
-  fix_bn: True   # True when finetuning freeze bn statistic
+  fix_bn: True   # True when finetuning freeze bn statistic (only freeze encoder, decoder)
   workers: 16
   disp_iter: 20
   step_iter: 1

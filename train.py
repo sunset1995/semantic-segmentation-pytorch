@@ -26,9 +26,12 @@ def train(segmentation_module, iterator, optimizers, history, epoch, cfg):
 
     segmentation_module.train()
     if cfg.TRAIN.fix_bn:
-        for m in segmentation_module.modules():
+        for m in segmentation_module.module.net.encoder.modules():
             if isinstance(m, nn.modules.batchnorm._BatchNorm):
-                segmentation_module.train(False)
+                m.train(False)
+        for m in segmentation_module.module.net.decoder.modules():
+            if isinstance(m, nn.modules.batchnorm._BatchNorm):
+                m.train(False)
 
     # main loop
     tic = time.time()
@@ -80,10 +83,11 @@ def train(segmentation_module, iterator, optimizers, history, epoch, cfg):
 
 def checkpoint(nets, history, cfg, epoch):
     print('Saving checkpoints...')
-    (net_encoder, net_decoder, crit) = nets
+    (net_encoder, net_decoder, net_head) = nets
 
     dict_encoder = net_encoder.state_dict()
     dict_decoder = net_decoder.state_dict()
+    dict_head = net_head.state_dict()
 
     torch.save(
         history,
@@ -94,11 +98,15 @@ def checkpoint(nets, history, cfg, epoch):
     torch.save(
         dict_decoder,
         '{}/decoder_epoch_{}.pth'.format(cfg.DIR, epoch))
+    torch.save(
+        dict_head,
+        '{}/head_epoch_{}.pth'.format(cfg.DIR, epoch))
 
 
 def group_weight(module):
     group_decay = []
     group_no_decay = []
+
     for m in module.modules():
         if isinstance(m, nn.Linear):
             group_decay.append(m.weight)
@@ -120,7 +128,7 @@ def group_weight(module):
 
 
 def create_optimizers(nets, cfg):
-    (net_encoder, net_decoder, crit) = nets
+    (net_encoder, net_decoder, net_head) = nets
     if cfg.TRAIN.optim == 'SGD':
         optimizer_encoder = torch.optim.SGD(
             group_weight(net_encoder),
@@ -130,6 +138,11 @@ def create_optimizers(nets, cfg):
         optimizer_decoder = torch.optim.SGD(
             group_weight(net_decoder),
             lr=cfg.TRAIN.lr_decoder,
+            momentum=cfg.TRAIN.beta1,
+            weight_decay=cfg.TRAIN.weight_decay)
+        optimizer_head = torch.optim.SGD(
+            group_weight(net_head),
+            lr=cfg.TRAIN.lr_head,
             momentum=cfg.TRAIN.beta1,
             weight_decay=cfg.TRAIN.weight_decay)
     elif cfg.TRAIN.optim == 'Adam':
@@ -143,21 +156,30 @@ def create_optimizers(nets, cfg):
             lr=cfg.TRAIN.lr_decoder,
             betas=(cfg.TRAIN.beta1, 0.999),
             weight_decay=cfg.TRAIN.weight_decay)
+        optimizer_head = torch.optim.Adam(
+            group_weight(net_head),
+            lr=cfg.TRAIN.lr_head,
+            momentum=cfg.TRAIN.beta1,
+            weight_decay=cfg.TRAIN.weight_decay)
     else:
         raise NotImplementedError
-    return (optimizer_encoder, optimizer_decoder)
+
+    return (optimizer_encoder, optimizer_decoder, optimizer_head)
 
 
 def adjust_learning_rate(optimizers, cur_iter, cfg):
     scale_running_lr = ((1. - float(cur_iter) / cfg.TRAIN.max_iters) ** cfg.TRAIN.lr_pow)
     cfg.TRAIN.running_lr_encoder = cfg.TRAIN.lr_encoder * scale_running_lr
     cfg.TRAIN.running_lr_decoder = cfg.TRAIN.lr_decoder * scale_running_lr
+    cfg.TRAIN.running_lr_head = cfg.TRAIN.lr_head * scale_running_lr
 
-    (optimizer_encoder, optimizer_decoder) = optimizers
+    (optimizer_encoder, optimizer_decoder, optimizer_head) = optimizers
     for param_group in optimizer_encoder.param_groups:
         param_group['lr'] = cfg.TRAIN.running_lr_encoder
     for param_group in optimizer_decoder.param_groups:
         param_group['lr'] = cfg.TRAIN.running_lr_decoder
+    for param_group in optimizer_head.param_groups:
+        param_group['lr'] = cfg.TRAIN.running_lr_head
 
 
 def main(cfg, gpus):
@@ -172,10 +194,8 @@ def main(cfg, gpus):
         num_class=cfg.DATASET.num_class,
         weights=cfg.MODEL.weights_decoder)
 
-    crit = nn.NLLLoss(ignore_index=-1, reduction='none')
-
     segmentation_module = SegmentationModule(
-        net_encoder, net_decoder, crit, cfg.TRAIN.deep_sup_scale)
+        cfg.MODEL.net, net_encoder, net_decoder, cfg.TRAIN.deep_sup_scale)
 
     # Dataset and Loader
     dataset_train = TrainDataset(
@@ -211,7 +231,11 @@ def main(cfg, gpus):
     segmentation_module.cuda()
 
     # Set up optimizers
-    nets = (net_encoder, net_decoder, crit)
+    nets = (
+        segmentation_module.module.net.encoder,
+        segmentation_module.module.net.decoder,
+        segmentation_module.module.net.head
+    )
     optimizers = create_optimizers(nets, cfg)
 
     # Main loop
@@ -288,6 +312,7 @@ if __name__ == '__main__':
     cfg.TRAIN.max_iters = cfg.TRAIN.epoch_iters * cfg.TRAIN.num_epoch
     cfg.TRAIN.running_lr_encoder = cfg.TRAIN.lr_encoder
     cfg.TRAIN.running_lr_decoder = cfg.TRAIN.lr_decoder
+    cfg.TRAIN.running_lr_head = cfg.TRAIN.lr_head
 
     random.seed(cfg.TRAIN.seed)
     torch.manual_seed(cfg.TRAIN.seed)
