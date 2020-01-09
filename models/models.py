@@ -1,3 +1,4 @@
+import importlib
 import torch
 import torch.nn as nn
 import torchvision
@@ -20,46 +21,22 @@ class SegmentationModuleBase(nn.Module):
 
 
 class SegmentationModule(SegmentationModuleBase):
-    def __init__(self, net_enc, net_dec, crit, deep_sup_scale=None):
+    def __init__(self, net_name, net_enc, net_dec, deep_sup_scale=None):
         super(SegmentationModule, self).__init__()
-        self.encoder = net_enc
-        self.decoder = net_dec
-        self.crit = crit
-        self.deep_sup_scale = deep_sup_scale
-        self.ohem_hard_thres = 0.7
-        self.ohem_min_pixels = 0.2
+        Net = importlib.import_module(f'models.nets.{net_name}').Net
+        self.net = Net(net_enc, net_dec, deep_sup_scale=None)
 
     def forward(self, feed_dict, *, segSize=None):
-        # training
+        loss, logit = self.net(feed_dict)
+
+        # Training mode
         if segSize is None:
-            pred = self.decoder(self.encoder(feed_dict['img_data'], return_feature_maps=True))
-            pred_deepsup = None
-            if isinstance(pred, tuple):
-                pred, pred_deepsup = pred
-
-            loss = self.crit(pred, feed_dict['seg_label'])
-            # online hard examples mining
-            B, H, W = feed_dict['seg_label'].shape
-            bidx, hidx, widx = torch.meshgrid(torch.arange(B), torch.arange(H), torch.arange(W))
-            pred_gt_prob = torch.exp(pred[bidx, feed_dict['seg_label'], hidx, widx])
-            hard_mask = (pred_gt_prob < self.ohem_hard_thres) & (feed_dict['seg_label'] >= 0)
-            min_pixels = int(self.ohem_min_pixels * (feed_dict['seg_label'] >= 0).sum().item())
-            if hard_mask.sum().item() > min_pixels:
-                loss = loss[hard_mask].mean()
-            else:
-                loss = loss.reshape(-1).topk(min_pixels)[0].mean()
-
-            # deep supervision
-            if pred_deepsup is not None:
-                loss_deepsup = self.crit(pred_deepsup, feed_dict['seg_label'])
-                loss = loss + loss_deepsup.mean() * self.deep_sup_scale
-
-            acc = self.pixel_acc(pred, feed_dict['seg_label'])
+            acc = self.pixel_acc(logit, feed_dict['seg_label'])
             return loss, acc
-        # inference
-        else:
-            pred = self.decoder(self.encoder(feed_dict['img_data'], return_feature_maps=True), segSize=segSize)
-            return pred
+
+        # Testing mode
+        logit = nn.functional.interpolate(logit, size=segSize, mode='bilinear', align_corners=False)
+        return logit
 
 
 class ModelBuilder:
@@ -151,6 +128,7 @@ class ModelBuilder:
                 fc_dim=fc_dim,
                 use_softmax=use_softmax)
         elif arch == 'ppm_deepsup':
+            # Pyramid Scene Parsing Network https://arxiv.org/pdf/1612.01105.pdf
             net_decoder = PPMDeepsup(
                 num_class=num_class,
                 fc_dim=fc_dim,
@@ -162,6 +140,7 @@ class ModelBuilder:
                 use_softmax=use_softmax,
                 fpn_dim=256)
         elif arch == 'upernet':
+            # Unified Perceptual Parsing for Scene Understanding https://arxiv.org/pdf/1807.10221.pdf
             net_decoder = UPerNet(
                 num_class=num_class,
                 fc_dim=fc_dim,
@@ -176,6 +155,22 @@ class ModelBuilder:
             raise Exception('Architecture undefined!')
 
         net_decoder.apply(ModelBuilder.weights_init)
+        '''
+        if arch == 'upernet':
+            for v in net_decoder.fpn_out:
+                v[-2].bn3.weight.data.fill_(0)
+                v[-2].bn3.bias.data.fill_(0)
+                v[-1].bn3.weight.data.fill_(0)
+                v[-1].bn3.bias.data.fill_(0)
+                for m in v[-2].modules():
+                    m.lr = 0.01
+                    if isinstance(m, BatchNorm2d):
+                        m.dont_freeze = 1
+                for m in v[-1].modules():
+                    m.lr = 0.01
+                    if isinstance(m, BatchNorm2d):
+                        m.dont_freeze = 1
+        '''
         if len(weights) > 0:
             print('Loading weights for net_decoder')
             net_decoder.load_state_dict(
@@ -213,28 +208,28 @@ class Resnet(nn.Module):
         self.layer3 = orig_resnet.layer3
         self.layer4 = orig_resnet.layer4
 
-    def forward(self, x, return_feature_maps=False):
+    def forward(self, x):
         conv_out = []
 
         x = self.relu1(self.bn1(self.conv1(x)))
         x = self.relu2(self.bn2(self.conv2(x)))
         x = self.relu3(self.bn3(self.conv3(x)))
+        conv_out.append(x)
         x = self.maxpool(x)
+
 
         x = self.layer1(x); conv_out.append(x);
         x = self.layer2(x); conv_out.append(x);
         x = self.layer3(x); conv_out.append(x);
         x = self.layer4(x); conv_out.append(x);
 
-        if return_feature_maps:
-            return conv_out
-        return [x]
+        return conv_out
 
 
 class ResnetDilated(nn.Module):
     def __init__(self, orig_resnet, dilate_scale=8, return_conv1=False):
         super(ResnetDilated, self).__init__()
-        self.return_conv1 = return_conv1
+        self.return_conv1 = True
         from functools import partial
 
         if dilate_scale == 8:
@@ -277,14 +272,13 @@ class ResnetDilated(nn.Module):
                     m.dilation = (dilate, dilate)
                     m.padding = (dilate, dilate)
 
-    def forward(self, x, return_feature_maps=False):
+    def forward(self, x):
         conv_out = []
 
         x = self.relu1(self.bn1(self.conv1(x)))
         x = self.relu2(self.bn2(self.conv2(x)))
         x = self.relu3(self.bn3(self.conv3(x)))
-        if self.return_conv1:
-            conv_out.append(x)
+        conv_out.append(x)
         x = self.maxpool(x)
 
         x = self.layer1(x); conv_out.append(x);
@@ -292,9 +286,7 @@ class ResnetDilated(nn.Module):
         x = self.layer3(x); conv_out.append(x);
         x = self.layer4(x); conv_out.append(x);
 
-        if return_feature_maps:
-            return conv_out
-        return [x]
+        return conv_out
 
 
 class MobileNetV2Dilated(nn.Module):
@@ -518,8 +510,8 @@ class PPMDeepsup(nn.Module):
         _ = self.dropout_deepsup(_)
         _ = self.conv_last_deepsup(_)
 
-        x = nn.functional.interpolate(x, scale_factor=4, mode='bilinear', align_corners=False)
-        _ = nn.functional.interpolate(_, scale_factor=4, mode='bilinear', align_corners=False)
+        x = nn.functional.interpolate(x, scale_factor=8, mode='bilinear', align_corners=False)
+        _ = nn.functional.interpolate(_, scale_factor=8, mode='bilinear', align_corners=False)
 
         x = nn.functional.log_softmax(x, dim=1)
         _ = nn.functional.log_softmax(_, dim=1)
@@ -562,8 +554,11 @@ class UPerNet(nn.Module):
 
         self.fpn_out = []
         for i in range(len(fpn_inplanes) - 1):  # skip the top layer
+            #from .resnet import Bottleneck
             self.fpn_out.append(nn.Sequential(
                 conv3x3_bn_relu(fpn_dim, fpn_dim, 1),
+                #Bottleneck(fpn_dim, fpn_dim//4),
+                #Bottleneck(fpn_dim, fpn_dim//4),
             ))
         self.fpn_out = nn.ModuleList(self.fpn_out)
 
@@ -573,6 +568,8 @@ class UPerNet(nn.Module):
         )
 
     def forward(self, conv_out, segSize=None):
+        conv1 = conv_out[0]
+        conv_out = conv_out[1:]
         conv5 = conv_out[-1]
 
         input_size = conv5.size()
@@ -607,126 +604,12 @@ class UPerNet(nn.Module):
         fusion_out = torch.cat(fusion_list, 1)
         x = self.conv_last(fusion_out)
 
-        if self.use_softmax:  # is True during inference
-            x = nn.functional.interpolate(
-                x, size=segSize, mode='bilinear', align_corners=False)
-            x = nn.functional.softmax(x, dim=1)
-            return x
-
-        x = nn.functional.interpolate(x, scale_factor=4, mode='bilinear', align_corners=False)
-        x = nn.functional.log_softmax(x, dim=1)
-
-        return x
-
-
-# acblock
-class ACBlock(nn.Module):
-    def __init__(self, fpn_dim, prev_lateral_dim, lateral_dim,
-                 use_global, delta=5):
-        super(ACBlock, self).__init__()
-        self.delta = delta
-        self.use_global = use_global
-        self.skip_conv = nn.Sequential(
-            nn.Conv2d(fpn_dim, fpn_dim, 3, padding=1, bias=False),
-            nn.BatchNorm2d(fpn_dim),
-            nn.ReLU(inplace=True)
-        )
-        self.global_conv = nn.Sequential(
-            nn.AdaptiveAvgPool2d(1),
-            nn.Conv2d(prev_lateral_dim, prev_lateral_dim, 1, bias=False),
-            nn.BatchNorm2d(prev_lateral_dim),
-            nn.ReLU(inplace=True)
-        )
-        self.local_conv1 = conv3x3_bn_relu(fpn_dim+prev_lateral_dim, lateral_dim)
-        self.local_conv2 = conv3x3_bn_relu(fpn_dim+lateral_dim, lateral_dim)
-        self.local_conv3 = conv3x3_bn_relu(fpn_dim+lateral_dim, lateral_dim)
-
-    def forward(self, x, x_skip):
-        # Preprocess skip features
-        x_skip = self.skip_conv(x_skip)
-        out_HW = x_skip.shape[2:]
-
-        # Global module
-        p = self.global_conv(x)
-        d = torch.norm(x - p, dim=1, keepdim=True)  # B1HW
-        d_min = d.min(dim=3)[0].min(dim=2)[0][:,:,None,None]
-        w_g = torch.exp(-(d - d_min) / self.delta)  # B1HW
-        if self.use_global:
-            # TODO: trainable alpha
-            x = w_g * p + x
-
-        # Upsample
-        up_kwargs = {'mode': 'bilinear', 'align_corners': False}
-        x = nn.functional.interpolate(x, size=out_HW, **up_kwargs)
-        w_g = nn.functional.interpolate(w_g, size=out_HW, **up_kwargs)
-
-        # Local module
-        w_l = 1 - w_g
-        x_skip = w_l * x_skip  # TODO: trainable beta
-        x = self.local_conv1(torch.cat([x, x_skip], 1))
-        x = self.local_conv2(torch.cat([x, x_skip], 1))
-        x = self.local_conv3(torch.cat([x, x_skip], 1))
-
-        return x
-
-
-# acnet
-class ACNet(nn.Module):
-    def __init__(self, num_class=150, fc_dim=2048,
-                 use_softmax=False,
-                 acdim1=256, acdim2=448, acdim3=512):
-        super(ACNet, self).__init__()
-        self.use_softmax = use_softmax
-
-        self.last_block_lateral = nn.Sequential(
-            nn.Conv2d(fc_dim, acdim3, 3, padding=1, bias=False),
-            nn.BatchNorm2d(acdim3),
-            nn.ReLU(inplace=True)
-        )
-        self.acb3 = ACBlock(512, acdim3, acdim3, use_global=True)
-        self.acb2 = ACBlock(256, acdim3, acdim2, use_global=False)
-        self.acb1 = ACBlock(128, acdim2, acdim1, use_global=False)
-        self.conv_last = nn.Sequential(
-            conv3x3_bn_relu(acdim1, acdim1, 1),
-            nn.Conv2d(acdim1, num_class, kernel_size=1)
-        )
-        # deepsup
-        self.deepsup = nn.Sequential(
-            conv3x3_bn_relu(fc_dim//2, fc_dim // 4, 1),
-            nn.Dropout2d(0.1),
-            nn.Conv2d(fc_dim // 4, num_class, 1, 1, 0)
-        )
-
-
-    def forward(self, conv_out, segSize=None):
-        conv1 = conv_out[0]
-        conv2 = conv_out[1]
-        conv3 = conv_out[2]
-        conv5 = conv_out[4]
-
-        x = self.last_block_lateral(conv5)
-        x = self.acb3(x, conv3)
-        x = self.acb2(x, conv2)
-        x = self.acb1(x, conv1)
-        x = self.conv_last(x)
-
-        if self.use_softmax:  # is True during inference
-            x = nn.functional.interpolate(
-                x, size=segSize, mode='bilinear', align_corners=False)
-            x = nn.functional.softmax(x, dim=1)
-            return x
-
-        # deepsup
-        conv4 = conv_out[-2]
-        x_deepsup = self.deepsup(conv4)
-
-        # upsample
-        x = nn.functional.interpolate(x, scale_factor=2, mode='bilinear', align_corners=False)
-        x_deepsup = nn.functional.interpolate(x_deepsup, x.shape[2:], mode='bilinear', align_corners=False)
-
-        # log softmax for training
-        x = nn.functional.log_softmax(x, dim=1)
-        x_deepsup = nn.functional.log_softmax(x_deepsup, dim=1)
-
-        return x, x_deepsup
+        return {
+            'logit': x,
+            'conv1': conv1,
+            'P2': fpn_feature_list[0],
+            'P3': fpn_feature_list[1],
+            'P4': fpn_feature_list[2],
+            'P5': fpn_feature_list[3],
+        }
 
